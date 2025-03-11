@@ -17,9 +17,9 @@ on:
         description: 'Kernel branch'
         options:
         - legacy
-        - current
+        - vendor
         - edge
-        default: 'current'
+        default: 'vendor'
 
       armbian_release:
         type: choice
