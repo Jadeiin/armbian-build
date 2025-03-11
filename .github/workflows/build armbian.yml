@@ -319,7 +319,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: hoiw/armbian-build@master
+      - uses: hoiw/armbian-build@main
         with:
           armbian_token:              "${{secrets.GITHUB_TOKEN}}"
           armbian_target:             "${{inputs.armbian_target}}"
