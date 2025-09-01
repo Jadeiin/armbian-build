@@ -87,6 +87,10 @@ inputs:
     required: false
     default: "Build with [Armbian tools](https://github.com/armbian/build)"
 
+  armbian_release_tag:
+    description: "Armbian release tag"
+    required: false
+
 runs:
   using: "composite"
 
@@ -111,7 +115,7 @@ runs:
         passphrase: ${{ inputs.armbian_pgp_password }}
 
     - name: "Checkout Armbian os"
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: armbian/os
         fetch-depth: 0
@@ -119,15 +123,15 @@ runs:
         path: os
 
     - name: "Checkout Armbian build framework"
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         repository: armbian/build
-        fetch-depth: 0
+        ref: ${{ inputs.armbian_branch }}
         clean: false
         path: build
 
     - name: "Checkout customisations"
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
         clean: false
@@ -143,7 +147,9 @@ runs:
         # copy os userpatches and custom
         mkdir -pv build/userpatches
         rsync -av os/userpatches/. build/userpatches/
-        [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. build/userpatches/
+        if [[ -d custom/userpatches ]]; then
+          rsync -av custom/userpatches/. build/userpatches/
+        fi
 
     - shell: bash
       run: |
@@ -163,9 +169,12 @@ runs:
           DESKTOP_ENVIRONMENT_CONFIG_NAME="config_base"
         fi
 
-        # go to build folder and checkout
+        # go to build folder
         cd build
-        git checkout ${{ inputs.armbian_branch }}
+
+        # default build command below doesn't prepare host dependencies
+        sudo ./compile.sh requirements
+        sudo chown -R $USER:$USER .
 
         # execute build command
         ./compile.sh "${{ inputs.armbian_target }}" \
@@ -194,7 +203,7 @@ runs:
 
     - uses: ncipollo/release-action@v1
       with:
-        tag: "${{ env.ARMBIAN_VERSION }}"
+        tag: ${{ inputs.armbian_release_tag != '' && inputs.armbian_release_tag || env.ARMBIAN_VERSION }}
         name: "${{ inputs.armbian_release_tittle }}"
         artifacts: "${{ inputs.armbian_artifacts }}*"
         allowUpdates: true

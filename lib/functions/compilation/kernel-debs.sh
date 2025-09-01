@@ -202,8 +202,11 @@ function kernel_package_callback_linux_image() {
 
 	# @TODO: we expect _all_ kernels to produce this, which is... not true.
 	declare kernel_pre_package_path="${tmp_kernel_install_dirs[INSTALL_PATH]}"
-	declare kernel_image_pre_package_path="${kernel_pre_package_path}/vmlinuz-${kernel_version_family}"
-	declare installed_image_path="boot/vmlinuz-${kernel_version_family}" # using old mkdebian terminology here for compatibility
+	kernel_image_installed_file_name=$(basename $(ls ${kernel_pre_package_path}/vmlinu*-${kernel_version_family}))
+	kernel_image_name=${kernel_image_installed_file_name%%-*}
+	display_alert "linux-image deb packaging kernel_image_name" "${kernel_image_name}" "info"
+	declare kernel_image_pre_package_path="${kernel_pre_package_path}/${kernel_image_name}-${kernel_version_family}"
+	declare installed_image_path="boot/${kernel_image_name}-${kernel_version_family}" # using old mkdebian terminology here for compatibility
 
 	display_alert "Showing contents of Kbuild produced /boot" "linux-image" "debug"
 	run_host_command_logged tree -C --du -h "${tmp_kernel_install_dirs[INSTALL_PATH]}"
@@ -262,7 +265,7 @@ function kernel_package_callback_linux_image() {
 		Maintainer: ${MAINTAINER} <${MAINTAINERMAIL}>
 		Section: kernel
 		Priority: optional
-		Provides: linux-image, linux-image-armbian, armbian-$BRANCH
+		Provides: linux-image, linux-image-armbian, armbian-$BRANCH, wireguard-modules
 		Description: Armbian Linux $BRANCH kernel image $kernel_version_family
 		 This package contains the Linux kernel, modules and corresponding other files.
 		 ${artifact_version_reason:-"${kernel_version_family}"}
@@ -385,6 +388,7 @@ function kernel_package_callback_linux_headers() {
 	[[ "${SRC_ARCH}" == "amd64" ]] && SRC_ARCH="x86"
 	[[ "${SRC_ARCH}" == "armhf" ]] && SRC_ARCH="arm"
 	[[ "${SRC_ARCH}" == "riscv64" ]] && SRC_ARCH="riscv"
+	[[ "${SRC_ARCH}" == "loong64" ]] && SRC_ARCH="loongarch"
 	# @TODO: added KERNEL_SRC_ARCH to each arch'es .config file; let's make sure they're sane. Just use KERNEL_SRC_ARCH after confirmed.
 	# Lets check and warn if it isn't. If warns don't popup over time we remove and just use ARCHITECTURE later.
 	if [[ "${SRC_ARCH}" != "${KERNEL_SRC_ARCH}" ]]; then
@@ -435,6 +439,16 @@ function kernel_package_callback_linux_headers() {
 		echo -e "clean:\n\techo fake clean for tools/vm" > "${headers_target_dir}/tools/vm/Makefile"
 	fi
 
+	# Small detour: in v6.14-rc1, in commit https://github.com/torvalds/linux/commit/e19bde2269ca,
+	#               the tools/pci dir was renamed to tools/testing/selftests/pci_endpoint.
+	#               Unfortunately tools/Makefile still expects it to exist,
+	#               and "make clean" in the "/tools" dir fails. Drop in a fake Makefile there to work around this.
+	if [[ ! -f "${headers_target_dir}/tools/pci/Makefile" ]] && [[ "${KERNEL_MAJOR_MINOR}" == "6.14" ]]; then
+		display_alert "Creating fake tools/pci/Makefile" "6.14 hackfix" "debug"
+		run_host_command_logged mkdir -p "${headers_target_dir}/tools/pci"
+		echo -e "clean:\n\techo fake clean for tools/pci" > "${headers_target_dir}/tools/pci/Makefile"
+	fi
+
 	# Hack for 6.5-rc1: create include/linux dir so the 'clean' step below doesn't fail. I've reported upstream...
 	display_alert "Creating fake counter/include/linux" "6.5-rc1 hackfix" "debug"
 	run_host_command_logged mkdir -p "${headers_target_dir}/tools/counter/include/linux"
@@ -444,10 +458,12 @@ function kernel_package_callback_linux_headers() {
 	# Understand: I'm sending the logs of this to the bitbucket ON PURPOSE: "clean" tries to use clang, ALSA, etc, which are not available.
 	#             The logs produced during this step throw off developers casually looking at the logs.
 	#             Important: if the steps _fail_ here, you'll have to enable DEBUG=yes to see what's going on.
+	#
+	# In order for the cleanup to be correct  for tools, we need to pass the VMLINUX_BTF variable,
+	# which contains the real path to the newly compiled vmlinux file.
 	declare make_bitbucket="&> /dev/null"
-	[[ "${DEBUG}" == "yes" ]] && make_bitbucket=""
-	run_host_command_logged cd "${headers_target_dir}" "&&" make "ARCH=${SRC_ARCH}" "M=scripts" clean "${make_bitbucket}"
-	run_host_command_logged cd "${headers_target_dir}/tools" "&&" make "ARCH=${SRC_ARCH}" clean "${make_bitbucket}"
+	run_host_command_logged cd "${headers_target_dir}" "&&" make "ARCH=${SRC_ARCH}" "M=scripts" clean "${make_bitbucket}" "||" make "ARCH=${SRC_ARCH}" "M=scripts" clean
+	run_host_command_logged cd "${headers_target_dir}/tools" "&&" make "ARCH=${SRC_ARCH}" "VMLINUX_BTF=${kernel_work_dir}/vmlinux" clean "${make_bitbucket}" "||" make "ARCH=${SRC_ARCH}" "VMLINUX_BTF=${kernel_work_dir}/vmlinux" clean
 
 	# Trim down on the tools dir a bit after cleaning.
 	rm -rf "${headers_target_dir}/tools/perf" "${headers_target_dir}/tools/testing"
@@ -515,12 +531,17 @@ function kernel_package_callback_linux_headers() {
 		cat <<- EOT_POSTINST
 			cd "/usr/src/linux-headers-${kernel_version_family}"
 			NCPU=\$(grep -c 'processor' /proc/cpuinfo)
-			echo "Compiling kernel-headers tools (${kernel_version_family}) using \$NCPU CPUs - please wait ..."
-			yes "" | make ARCH="${SRC_ARCH}" oldconfig
+			echo "Configuring kernel-headers (${kernel_version_family}) - please wait ..."
+			make ARCH="${SRC_ARCH}" olddefconfig
+
+			echo "Compiling kernel-headers scripts (${kernel_version_family}) using \$NCPU CPUs - please wait ..."
 			make ARCH="${SRC_ARCH}" -j\$NCPU scripts
+
+			echo "Compiling kernel-headers scripts/mod (${kernel_version_family}) using \$NCPU CPUs - please wait ..."
 			make ARCH="${SRC_ARCH}" -j\$NCPU M=scripts/mod/
+
 			# make ARCH="${SRC_ARCH}" -j\$NCPU modules_prepare # depends on too much other stuff.
-			echo "Done compiling kernel-headers tools (${kernel_version_family})."
+			echo "Done compiling kernel-headers (${kernel_version_family})."
 		EOT_POSTINST
 
 		if [[ "${ARCH}" == "amd64" ]]; then # This really only works on x86/amd64; @TODO revisit later

@@ -38,11 +38,14 @@ function extension_prepare_config__prepare_grub_standard() {
 			else
 				packages+=("grub-efi-${ARCH}")
 			fi
+		else
+			packages+=("grub-efi-${ARCH}")
 		fi
 
 		if [[ "${ARCH}" == "arm64" ]]; then
-			packages+=("grub-efi-${ARCH}")
 			declare -g UEFI_GRUB_TARGET="arm64-efi" # Default for arm64-efi
+		elif [[ "${ARCH}" == "loong64" ]]; then
+			declare -g UEFI_GRUB_TARGET="loongarch64-efi"
 		fi
 	fi
 
@@ -247,6 +250,13 @@ pre_umount_final_image__900_export_kernel_and_initramfs() {
 }
 
 configure_grub() {
+	display_alert "Extension: ${EXTENSION}: Configuring GRUB" "UEFI GRUB; SERIALCON=${SERIALCON}" "info"
+
+	# If SERIALCON is _not_ tty1 or tty0, include a console=tty0 first.
+	if [[ "${SERIALCON}" != "tty1" && "${SERIALCON}" != "tty0" ]]; then
+		GRUB_CMDLINE_LINUX_DEFAULT+=" console=tty0"
+	fi
+
 	[[ -n "$SERIALCON" ]] &&
 		GRUB_CMDLINE_LINUX_DEFAULT+=" console=${SERIALCON}"
 
@@ -266,7 +276,7 @@ configure_grub() {
 		run_host_command_logged chmod -v +x "${MOUNT}"/usr/share/desktop-base/grub_background.sh
 	fi
 
-	display_alert "Extension: ${EXTENSION}: GRUB EFI kernel cmdline" "${GRUB_CMDLINE_LINUX_DEFAULT} distro=${UEFI_GRUB_DISTRO_NAME} timeout=${UEFI_GRUB_TIMEOUT}" ""
+	display_alert "Extension: ${EXTENSION}: GRUB EFI kernel cmdline" "cmdline '${GRUB_CMDLINE_LINUX_DEFAULT}' distro=${UEFI_GRUB_DISTRO_NAME} timeout=${UEFI_GRUB_TIMEOUT}" ""
 	cat <<- grubCfgFrag >> "${MOUNT}"/etc/default/grub.d/98-armbian.cfg
 		GRUB_CMDLINE_LINUX_DEFAULT="${GRUB_CMDLINE_LINUX_DEFAULT}"
 		GRUB_TIMEOUT_STYLE=menu                                  # Show the menu with Kernel options (Armbian or -generic)...

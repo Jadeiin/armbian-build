@@ -20,7 +20,7 @@
 #   $4 = :space: separated list of all MTD device names
 #        Note: MTD char device names are passed in format device_name:partition_label - e.g.: mtd0:SPL
 
-trap "exit" INT TERM
+trap "systemctl start docker >/dev/null 2>&1; exit" INT TERM
 [[ $EUID != 0 ]] && exec sudo "$0" "$@"
 
 [[ -f /usr/lib/u-boot/platform_install.sh ]] && source /usr/lib/u-boot/platform_install.sh
@@ -57,7 +57,7 @@ root_partition_device=/dev/$root_partition_device_name
 # find targets: legacy SUNXI NAND, EMMC, SATA, NVMe, MTD block and/or MTD char driven flash
 [[ -b /dev/nand ]] && nandcheck=$(ls -d -1 /dev/nand* | grep -w 'nand' | awk '{print $NF}');
 emmccheck=$(ls -d -1 /dev/mmcblk* 2>/dev/null | grep -w 'mmcblk[0-9]' | grep -v "$root_partition_device");
-diskcheck=$(lsblk -l | awk -F" " '/ disk / {print $1}' | grep -E '^sd|^nvme|^mmc' | grep -v "$root_partition_device_name" | grep -v boot)
+diskcheck=$(lsblk -Al | awk -F" " '/ disk / {print $1}' | grep -E '^sd|^nvme|^mmc' | grep -v "$root_partition_device_name" | grep -v boot)
 # Start mtdcheck with probable MTD block device partitions:
 mtdcheck=$(grep 'mtdblock' /proc/partitions | awk '{print $NF}' | xargs)
 # Append mtdcheck with probable MTD char devices filtered for partition name(s)
@@ -96,7 +96,7 @@ mkopts[f2fs]='-f'
 
 # @TODO source these options from one source, this is mostly defined in partioning.sh
 mountopts[ext4]='defaults,noatime,commit=120,errors=remount-ro,x-gvfs-hide	0	1'
-mountopts[btrfs]='defaults,noatime,commit=120,compress=lzo,x-gvfs-hide			0	2'
+mountopts[btrfs]="defaults,commit=120,compress=lzo,x-gvfs-hide,subvol=@	0	2"
 mountopts[f2fs]='defaults,noatime,x-gvfs-hide	0	2'
 
 # Create boot and root file system #
@@ -120,11 +120,24 @@ create_armbian()
 		[[ -n $2 ]] && ( mount -o compress-force=zlib "$2" "${TempDir}"/rootfs 2> /dev/null || mount "$2" "${TempDir}"/rootfs )
 		[[ -n $1 && $1 != "mtd" ]] && mount "$1" "${TempDir}"/bootfs
 	fi
+
+	# make separate subvolume for rootfs on btrfs
+	if [[ $eMMCFilesystemChoosen =~ ^(btrfs)$ ]]; then
+		btrfs subvolume create "${TempDir}"/rootfs/@
+		sync
+		btrfs subvolume list ${TempDir}/rootfs/ | grep 'path @$' | cut -d' ' -f2 \
+			| xargs -I{} btrfs subvolume set-default {} ${TempDir}/rootfs/
+		umount "${TempDir}"/rootfs
+		mount -o compress-force=zlib,subvol=@ "$2" "${TempDir}"/rootfs 2> /dev/null
+	fi
 	rm -rf "${TempDir}"/bootfs/* "${TempDir}"/rootfs/*
 
 	# sata root part
 	# UUID=xxx...
 	satauuid=$(blkid -o export "$2" | grep -w UUID)
+
+	# disable docker before start
+	systemctl is-active --quiet docker && systemctl stop docker
 
 	# write information to log
 	echo -e "\nOld UUID:  ${root_uuid}" >> $logfile
@@ -669,6 +682,8 @@ check_partitions()
 	CMD="lsblk -io KNAME,FSTYPE,SIZE,TYPE,MOUNTPOINT | grep -v -w $root_partition_name $INCLUDE $EXCLUDE | grep -E '^sd|^nvme|^md|^mmc' | awk -F\" \" '/ part | raid..? / {print \$1}'"
 	AvailablePartitions=$(eval $CMD)
 
+	FREE_SPACE=$(sfdisk --list-free /dev/$diskcheck | grep G | tail -1 | awk '{print $4}' | sed "s/G//")
+
 	dialog --yes-label "Proceed" --no-label 'Skip' --title "$title" --backtitle "$backtitle" --yesno "\nIt is highly recommended to wipe all partitions on the destination disk\n \n/dev/$diskcheck\n\nand leave installer to make them!" 10 75
 
 	# wiping destination to make sure we don't run into issues
@@ -680,13 +695,16 @@ check_partitions()
 		if [[ "${ACKNOWLEDGEMENT}" == "Yes, I understand" ]]; then
 			dd if=/dev/zero of=/dev/${diskcheck} bs=1M count=10 >> $logfile 2>&1
 			partprobe -s "/dev/${diskcheck}" >> $logfile 2>&1
-			echo -e 'mktable gpt\nmkpart primary ext4 0% 100%\nquit' | sudo parted "/dev/${diskcheck}" >> $logfile 2>&1
-			sudo partprobe -s "/dev/${diskcheck}" >> $logfile 2>&1
-			sleep 2
+			# only make one ext4 partition if we don't have UEFI
+			if [[ "$DEVICE_TYPE" != uefi ]]; then
+				echo -e 'mktable gpt\nmkpart primary ext4 0% 100%\nquit' | sudo parted "/dev/${diskcheck}" >> $logfile 2>&1
+				sudo partprobe -s "/dev/${diskcheck}" >> $logfile 2>&1
+				sleep 2
+			fi
 		fi
 	fi
 
-	if [[ -z $AvailablePartitions ]]; then
+	if [[ -z $AvailablePartitions ]] || [[ "${FREE_SPACE%.*}" -gt 4 ]]; then
 		# Consider brand new devices or devices with a wiped partition table
 		if [[ -z $(blkid /dev/$diskcheck) ]]; then
 			# There is not yet any partition table on the disk device.
@@ -736,7 +754,7 @@ check_partitions()
 			} | fdisk /dev/$diskcheck &> /dev/null || true
 		fi
 	fi
-	CMD="lsblk -io KNAME,FSTYPE,SIZE,TYPE,MOUNTPOINT | grep -v -w $root_partition_name $INCLUDE $EXCLUDE | grep -E '^sd|^nvme|^md|^mmc' | awk -F\" \" '/ part | raid..? / {print \$1}' | uniq | sed 's|^|/dev/|' | nl | xargs echo -n"
+	CMD="lsblk -io KNAME,FSTYPE,SIZE,TYPE,MOUNTPOINT,PARTTYPENAME | grep -v -w $root_partition_name $INCLUDE $EXCLUDE | grep Linux | grep -E '^sd|^nvme|^md|^mmc' | awk -F\" \" '/ part | raid..? / {print \$1}' | uniq | sed 's|^|/dev/|' | nl | xargs echo -n"
 	partprobe
 	AvailablePartitions=$(eval $CMD)
 	PartitionOptions=($AvailablePartitions)

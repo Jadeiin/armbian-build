@@ -125,6 +125,9 @@ do_firstrun_automated_network_configuration()
 				# - Ethernet enable
 				elif [[ $PRESET_NET_ETHERNET_ENABLED == 1 ]]; then
 
+						# remove dhcp config
+						rm -f /etc/netplan/10-dhcp-all-interfaces.yaml
+
 						DEVICE_NAME=${eth_index}
 						DEVTYPE=ethernets
 						echo -e "$(createYAML)" > /etc/netplan/30-${DEVTYPE}${CONFIG_NAME}.yaml
@@ -301,6 +304,8 @@ set_timezone_and_locales() {
 					WIFI_DEVICE=$(echo ${WIFI_DEVICES[$input-1]} | cut -d"," -f2)
 				fi
 
+				# bring up wifi device (not done by networkd, only by NetworkManager)
+				ip link set ${WIFI_DEVICE} up
 				# get list of wireless networks
 				scanning=0
 				broken=1
@@ -398,7 +403,6 @@ set_timezone_and_locales() {
 							rm -f /etc/netplan/30-wifis-dhcp.yaml
 							netplan apply --timeout 0 2>/dev/null
 							systemctl daemon-reload
-							break
 						fi
 
 				fi # detected or not detected wireless network
@@ -583,7 +587,7 @@ add_user() {
 			# download and add SSH key if defined
 			if [[ -n "${PRESET_USER_KEY}" ]]; then
 				mkdir -p /home/"$RealUserName"/.ssh/
-				curl --retry 5 --connect-timeout 3 "${PRESET_ROOT_KEY}" > /home/"$RealUserName"/.ssh/authorized_keys 2> /dev/null
+				curl --retry 5 --connect-timeout 3 "${PRESET_USER_KEY}" > /home/"$RealUserName"/.ssh/authorized_keys 2> /dev/null
 				chown -R "$RealUserName":"$RealUserName" /home/"$RealUserName"/.ssh/
 			fi
 
@@ -607,7 +611,6 @@ add_user() {
 			echo -e "\nDear \e[0;92m${RealName}\x1B[0m, your account \e[0;92m${RealUserName}\x1B[0m has been created and is sudo enabled."
 			echo -e "Please use this account for your daily work from now on.\n"
 			rm -f /root/.not_logged_in_yet
-			chmod +x /etc/update-motd.d/*
 			# set up profile sync daemon on desktop systems
 			if command -v psd > /dev/null 2>&1; then
 				echo -e "${RealUserName} ALL=(ALL) NOPASSWD: /usr/bin/psd-overlay-helper" >> /etc/sudoers
@@ -658,15 +661,56 @@ if [[ -f /root/.not_logged_in_yet && -n $(tty) ]]; then
 	echo -e "\nWaiting for system to finish booting ..."
 	systemctl is-system-running --wait > /dev/null
 
-	# enable hiDPI support
-	if [[ "$(cut -d, -f1 < /sys/class/graphics/fb0/virtual_size 2> /dev/null)" -gt 1920 ]]; then
-		# lightdm
-		[[ -f /etc/lightdm/slick-greeter.conf ]] && echo "enable-hidpi = on" >> /etc/lightdm/slick-greeter.conf
-		# xfce
-		[[ -f /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml ]] && sed -i 's|<property name="WindowScalingFactor" type="int" value=".*|<property name="WindowScalingFactor" type="int" value="2">|g' /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml
+	# enable networkManager-wait-online.service
+	# When NM is used the NetworkManager-wait-online.service must be enabled so that network-online.target is not reached until
+	# NetworkManager has brought up all the interfaces. Service units that require the network to be up before starting rely
+	# on network-online.target working correctly otherwise they will likely fail on boot
+	# Same goes for systemd-networkd stack
+	# https://github.com/armbian/build/issues/7896
+	if
+		systemctl is-enabled --quiet NetworkManager &&
+		! systemctl is-enabled --quiet NetworkManager-wait-online
+	then
+		systemctl enable NetworkManager-wait-online
+		# @TODO: determine if there is any value in starting it now
+		echo "Waiting for network startup to complete..."
+		systemctl start NetworkManager-wait-online
+	fi
 
-		# framebuffer console larger font
-		setfont /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz
+	if
+		systemctl is-enabled --quiet systemd-networkd &&
+		! systemctl is-enabled --quiet systemd-networkd-wait-online
+	then
+		systemctl enable systemd-networkd-wait-online
+		# @TODO: determine if there is any value in starting it now
+		echo "Waiting for network startup to complete..."
+		systemctl start systemd-networkd-wait-online
+	fi
+
+	# Enable HiDPI support only if the framebuffer size is detectable
+	FB_VIRTUAL_SIZE="/sys/class/graphics/fb0/virtual_size"
+	HIDPI_THRESHOLD="1920"
+	if [[ -r "$FB_VIRTUAL_SIZE" ]]; then
+		fb_virtual_width=$(cut -d, -f1 < "$FB_VIRTUAL_SIZE" 2>/dev/null)
+		if [[ "$fb_virtual_width" =~ ^[0-9]+$ && "$fb_virtual_width" -gt "${HIDPI_THRESHOLD}" ]]; then
+			# Enable HiDPI in LightDM slick-greeter
+			if [[ -f /etc/lightdm/slick-greeter.conf ]]; then
+				if ! grep -q "^enable-hidpi *= *on" /etc/lightdm/slick-greeter.conf; then
+					echo "enable-hidpi = on" >> /etc/lightdm/slick-greeter.conf
+				fi
+			fi
+
+			# Set XFCE scaling factor in skeleton config
+			XFCE_XSETTINGS="/etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml"
+			if [[ -f "$XFCE_XSETTINGS" ]]; then
+				sed -i 's|\(<property name="WindowScalingFactor" type="int" value="\)[^"]*\(">\)|\12\2|' "$XFCE_XSETTINGS"
+			fi
+
+			# Set a larger console font for framebuffer
+			if [[ -f /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz ]]; then
+				setfont /usr/share/consolefonts/Uni3-TerminusBold32x16.psf.gz
+			fi
+		fi
 	fi
 
 	clear
@@ -702,9 +746,20 @@ if [[ -f /root/.not_logged_in_yet && -n $(tty) ]]; then
 			fi
 		fi
 
-		# only allow one login. Once you enter root password, kill others.
-		loginfrom=$(who am i | awk '{print $2}')
-		who -la | grep root | grep -v "$loginfrom" | awk '{print $7}' | xargs --no-run-if-empty kill -9
+		# Get current session identifiers
+		current_tty=$(tty | sed 's:/dev/::')  # e.g., "tty1"
+		current_pid=$$
+
+		# Kill ONLY other active root SHELL sessions (not login processes)
+		ps -u root -o pid,tty,comm |
+		  awk -v me="$current_tty" -v mypid="$current_pid" '
+		    NR>1 && $2 != "?" && $2 != me && $1 != mypid && $3 ~ /sh$/ {
+		      print $1
+		    }' |
+		  xargs --no-run-if-empty kill -9
+
+		# enable motd
+		chmod +x /etc/update-motd.d/*
 
 		first_input="$password"
 		if [ -z "$PRESET_ROOT_PASSWORD" ];then
@@ -932,5 +987,11 @@ if [[ -f /root/.not_logged_in_yet && -n $(tty) ]]; then
 			printf "\n\n\e[0;91mWarning: a reboot is needed to finish resizing the filesystem \x1B[0m \n"
 			printf "\e[0;91mPlease reboot the system now \x1B[0m \n\n"
 		fi
+
 	fi
+fi
+
+# Run provisioning script if exists
+if [[ -f /root/provisioning.sh ]]; then
+	. /root/provisioning.sh
 fi

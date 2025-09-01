@@ -26,18 +26,18 @@ source "${BASH_SOURCE%/*}/crust_firmware.inc"
 case $BRANCH in
 
 	legacy)
-		declare -g KERNEL_MAJOR_MINOR="6.1" # Major and minor versions of this kernel.
-		declare -g KERNELBRANCH="tag:v6.1.104"
+		declare -g KERNEL_MAJOR_MINOR="6.6" # Major and minor versions of this kernel.
+		declare -g KERNELBRANCH="tag:v6.6.75" # frozen on this version
 		;;
 
 	current)
-		declare -g KERNEL_MAJOR_MINOR="6.6" # Major and minor versions of this kernel.
-		declare -g KERNELBRANCH="tag:v6.6.62"
+		declare -g KERNEL_MAJOR_MINOR="6.12" # Major and minor versions of this kernel.
+		declare -g KERNELBRANCH="tag:v6.12.43"
 		;;
 
 	edge)
-		declare -g KERNEL_MAJOR_MINOR="6.11" # Major and minor versions of this kernel.
-		declare -g KERNELBRANCH="tag:v6.11.9"
+		declare -g KERNEL_MAJOR_MINOR="6.15" # Major and minor versions of this kernel.
+		declare -g KERNELBRANCH="tag:v6.15.4"
 		;;
 esac
 
@@ -63,12 +63,13 @@ write_uboot_platform() {
 }
 
 setup_write_uboot_platform() {
+	local tmp part dev
 	if grep -q "ubootpart" /proc/cmdline; then
-		local tmp=$(cat /proc/cmdline)
+		tmp=$(cat /proc/cmdline)
 		tmp="${tmp##*ubootpart=}"
 		tmp="${tmp%% *}"
-		[[ -n $tmp ]] && local part=$(findfs PARTUUID=$tmp 2> /dev/null)
-		[[ -n $part ]] && local dev=$(lsblk -n -o PKNAME $part 2> /dev/null)
+		[[ -n $tmp ]] && part=$(findfs PARTUUID=$tmp 2> /dev/null)
+		[[ -n $part ]] && dev=$(lsblk -n -o PKNAME $part 2> /dev/null)
 		[[ -n $dev ]] && DEVICE="/dev/$dev"
 	elif [[ -f /var/lib/armbian/force_search_uboot ]]; then
 		# This may cause overwriting u-boot for android or other non-Armbian OS installed on eMMC

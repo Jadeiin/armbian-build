@@ -1,4 +1,4 @@
-From 7dd4e48ccf6d23042982b636f605347a17e62b12 Mon Sep 17 00:00:00 2001
+From 9017a1990240b517555ba1a3f58a90d572255ca0 Mon Sep 17 00:00:00 2001
 From: The-going <48602507+The-going@users.noreply.github.com>
 Date: Wed, 2 Feb 2022 13:02:10 +0300
 Subject: arm64:dts:allwinner:overlay: Add Overlays for sunxi64
@@ -387,7 +387,7 @@ index 000000000000..1ac7fbcf62d1
 @@ -0,0 +1,250 @@
 +This document describes overlays provided in the kernel packages
 +For generic Armbian overlays documentation please see
-+https://docs.armbian.com/User-Guide_Allwinner_overlays/
++https://docs.armbian.com/User-Guide_Armbian_overlays/
 +
 +### Platform:
 +

@@ -1,6 +1,6 @@
 This document describes overlays provided in the kernel packages
 For generic Armbian overlays documentation please see
-https://docs.armbian.com/User-Guide_Allwinner_overlays/
+https://docs.armbian.com/User-Guide_Armbian_overlays/
 
 ### Platform:
 
@@ -15,6 +15,10 @@ for RK3308 (Rock PI-S)
 - rk3308bs rk3308bs-1.3ghz sdio-10mhz sdio-4mhz emmc
 
 ### Overlay details:
+
+### mkspi-disable-lcd-spi
+
+DTBO to disable spi_for_{lcd,touch} when enabling uart1
 
 ### i2c7
 
