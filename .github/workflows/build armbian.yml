@@ -7,7 +7,8 @@ jobs:
     steps:
       - uses: Jadeiin/armbian-build@main
         with:
-          armbian_token:     "${{ secrets.GITHUB_TOKEN }}"  # GitHub token
-          armbian_release:   "trixie"                        # userspace
-          armbian_target:    "build"                        # build=image, kernel=kernel
-          armbian_board:     "yjh-jm10-3588"                   # build target
+          armbian_token: "${{ secrets.GITHUB_TOKEN }}" # GitHub token
+          armbian_target: "build" # build=image, kernel=kernel
+          armbian_kernel_branch: "vendor" # kernel branch
+          armbian_release: "trixie" # userspace
+          armbian_board: "yjh-jm10-3588" # build target
