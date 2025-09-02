@@ -10,4 +10,4 @@ jobs:
           armbian_token:     "${{ secrets.GITHUB_TOKEN }}"  # GitHub token
           armbian_release:   "trixie"                        # userspace
           armbian_target:    "build"                        # build=image, kernel=kernel
-          armbian_board:     "yjh-jm10"                   # build target
+          armbian_board:     "yjh-jm10-3588"                   # build target

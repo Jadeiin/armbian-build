@@ -8,7 +8,7 @@ BOOTCONFIG="rk3588_defconfig"
 BOOT_FDT_FILE="rockchip/rk3588-yjh-jm10.dtb"
 BOOT_LOGO="desktop"
 FULL_DESKTOP="no"
-#Ó²¸Ädsa½»»»»ú ÉèÖÃ JM10_DSA_88E6390="yes" ÄÚºË°æ±¾ÕâÀïÊ¹ÓÃvendor 6.1x, legacy 5.10ÄÚºËÎ´²âÊÔ
+#ç¡¬æ”¹dsaäº¤æ¢æœº è®¾ç½® JM10_DSA_88E6390="yes" å†…æ ¸ç‰ˆæœ¬è¿™é‡Œä½¿ç”¨vendor 6.1x, legacy 5.10å†…æ ¸æœªæµ‹è¯•
 #./compile.sh BOARD=yjh-jm10-3588 BRANCH=vendor BUILD_DESKTOP=no BUILD_MINIMAL=yes KERNEL_CONFIGURE=no RELEASE=noble JM10_DSA_88E6390=yes
 JM10_DSA_88E6390="no"
 IMAGE_PARTITION_TABLE="gpt"
@@ -97,7 +97,7 @@ function post_family_tweaks__JM10-3588_enable_services() {
 
 	if [[ ${JM10_DSA_88E6390} = "yes" ]] && [[ ${BRANCH} = "vendor" || ${BRANCH} = "legacy" ]] && [[ ${BUILD_DESKTOP} = "no" ]]; then
 		#Only for Jm10 Hard Change. del /etc/netplan/10-dhcp-all-interfaces.yaml and add 10-dsa-MV88E6XXX-br0.yaml
-		#×ÀÃæÅäÖÃ	ÍøÂçÊ¹ÓÃNetworkManager,×ÔĞĞÍ¼ĞÎ»¯ÅäÖÃÍøÇÅ,Ôİ²»ÓÃ10-dsa-MV88E6XXX-br0.yamlÅäÖÃÍøÇÅ
+		#æ¡Œé¢é…ç½®	ç½‘ç»œä½¿ç”¨NetworkManager,è‡ªè¡Œå›¾å½¢åŒ–é…ç½®ç½‘æ¡¥,æš‚ä¸ç”¨10-dsa-MV88E6XXX-br0.yamlé…ç½®ç½‘æ¡¥
 		display_alert "$BOARD" "Only for Jm10 Hard Change del 10-dhcp-all-interfaces.yaml and add 10-dsa-MV88E6XXX-br0.yaml" "info"
 		rm -rf ${SDCARD}/etc/netplan/*.yaml
 		cat <<- EOF > "${SDCARD}/etc/netplan/10-dsa-MV88E6XXX-br0.yaml"
