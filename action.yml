@@ -1,5 +1,5 @@
 name: "Rebuild Armbian"
-author: "https://github.com/armbian"
+author: "https://github.com/Jadeiin"
 description: "Build Armbian Linux"
 inputs:
 
@@ -85,7 +85,7 @@ inputs:
   armbian_release_body:
     description: "Armbian images"
     required: false
-    default: "Build with [Armbian tools](https://github.com/armbian/build)"
+    default: "Build with [Armbian tools](https://github.com/Jadeiin/armbian-build)"
 
   armbian_release_tag:
     description: "Armbian release tag"
@@ -125,7 +125,7 @@ runs:
     - name: "Checkout Armbian build framework"
       uses: actions/checkout@v5
       with:
-        repository: armbian/build
+        repository: Jadeiin/armbian-build
         ref: ${{ inputs.armbian_branch }}
         clean: false
         path: build
